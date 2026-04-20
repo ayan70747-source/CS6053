@@ -39,7 +39,7 @@ from planner import Robot, prioritized_plan
 
 GRID_ROWS = 15
 GRID_COLS = 15
-OBSTACLE_DENSITY = 0.20    # 20 % of cells are shelves
+OBSTACLE_DENSITY = 0.20    # 20% of cells are shelves
 SEED = 42                  # Reproducibility seed
 
 # Scenario sizes to benchmark
@@ -337,7 +337,7 @@ def main():
     print("  Scalability Summary")
     print("=" * 60)
     print(f"{'Agents':<10} {'Avg Path Len':>14} {'Total Plan (ms)':>18}")
-    print("-" * 44)
+    print("-" * 60)
     for n, data in all_scenarios.items():
         results = data["results"]
         valid_paths = [r["path_length"] for r in results.values()

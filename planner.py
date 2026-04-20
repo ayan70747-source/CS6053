@@ -138,7 +138,8 @@ def astar(env: WarehouseEnv,
     g_cost = {start_state: 0}
 
     while open_heap:
-        f, g, _, current_state, _ = heapq.heappop(open_heap)
+        # Heap entry: (f, g, tie_breaker, state, parent_state)
+        f, g, _tie, current_state, _parent = heapq.heappop(open_heap)
         t, r, c = current_state
 
         # Goal test (position only – time doesn't matter at goal)

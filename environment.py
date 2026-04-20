@@ -48,7 +48,6 @@ class WarehouseEnv:
 
         # Reproducible random layout
         rng = random.Random(seed)
-        np_rng = np.random.default_rng(seed)
 
         # Start with all floor cells
         self.grid = np.zeros((rows, cols), dtype=np.int8)
