@@ -90,6 +90,108 @@ This implementation includes the following original contributions aligned with c
 4. Explicit wait-vs-detour rationality tracking, logged as measurable planner behaviour.
 5. End-to-end automated experiment pipeline that directly writes CSV analysis data for report inclusion.
 
+## What Is Happening In The Simulation
+
+The simulation models an automated warehouse in which multiple robots must complete a two-stage task:
+
+1. Start from a depot-side location.
+2. Travel to a pick cell beside a shelf.
+3. Collect the item.
+4. Return the item to the packing station.
+
+The warehouse layout is created in [environment.py](/workspaces/CS6053/environment.py), each robot's state is managed in [agent.py](/workspaces/CS6053/agent.py), the planning logic is implemented in [planner.py](/workspaces/CS6053/planner.py), and the full experiment loop is run in [simulation.py](/workspaces/CS6053/simulation.py).
+
+The animation is not random movement. It is the visual result of a planning process where each robot computes a legal action sequence before execution.
+
+## Why This Demonstrates Intelligent Behaviour
+
+The project demonstrates intelligent behaviour because every robot is goal-directed and evaluates actions using informed search rather than fixed rules.
+
+You can explain the intelligence like this:
+
+1. Each agent has a clear goal: reach a pick location and then return to the packing station.
+2. Each agent reasons about future outcomes using A* search instead of moving greedily.
+3. The planner works in space and time, so it reasons about where robots will be and when they will be there.
+4. Lower-priority robots adapt their plans around higher-priority robots' reserved future paths.
+5. Waiting is treated as a rational action when immediate movement would create a conflict or a worse route.
+
+This means the system is not just animated movement. It is a decision-making system that chooses actions with respect to goals, costs, and constraints.
+
+## Why The Agents Are Rational
+
+A rational agent is one that selects the action sequence most likely to achieve its goal based on available information.
+
+In this simulation, that means:
+
+1. The agent knows the warehouse map.
+2. The agent knows which cells are blocked by shelves.
+3. The agent considers the future reserved positions of higher-priority robots.
+4. The agent chooses the path with minimum estimated total cost using A*.
+5. If the direct route is blocked, the agent can compare waiting against taking a longer detour.
+
+This is the core rationality argument for the coursework. The robot does not simply react; it plans.
+
+## How To Explain A* Simply
+
+The planning score is:
+
+f(n) = g(n) + h(n)
+
+Where:
+
+1. g(n) is the real path cost so far, measured in movement ticks.
+2. h(n) is the Manhattan distance to the goal.
+3. f(n) is the total estimated cost used to rank candidate states.
+
+The Manhattan heuristic is appropriate because robots move in four directions on a grid.
+
+## How Collision Avoidance Works
+
+Collision avoidance is handled by prioritized planning with time-space occupancy.
+
+The explanation to give is:
+
+1. Agents are ordered by priority.
+2. The first agent plans its full path.
+3. That path is stored in a reservation table with time stamps.
+4. The next agent treats those future occupied cells as dynamic obstacles.
+5. The planner also prevents edge-swap collisions, where two robots would cross through each other in opposite directions.
+
+This is why the robots appear coordinated even though each one plans its own route.
+
+## What To Show The Professor
+
+During a demo, the clearest flow is:
+
+1. Show the animation in [warehouse_mapf.gif](/workspaces/CS6053/warehouse_mapf.gif).
+2. Explain the map symbols:
+   - Brown blocks are shelves.
+   - The packing station is the delivery point.
+   - Stars are pick targets.
+   - Coloured circles are robots.
+3. Explain the task sequence: each robot goes from start to pick, then from pick to delivery.
+4. Explain that the paths are computed by Rational A* and not manually scripted.
+5. Show [warehouse_performance.csv](/workspaces/CS6053/warehouse_performance.csv) as the evidence for performance analysis.
+
+## What To Emphasise In The Report Or Viva
+
+If asked what the project proves, focus on these points:
+
+1. It demonstrates action planning because the system generates full action sequences over time.
+2. It demonstrates rationality because each agent selects actions that minimize estimated cost while respecting constraints.
+3. It demonstrates intelligent behaviour because robots adapt to dynamic occupancy rather than following static shortest paths.
+4. It demonstrates performance evaluation because the code automatically records scenario metrics for 2, 5, and 10 agents.
+
+## Short Presentation Script
+
+This project models a warehouse where multiple robots collect items and return them to a packing station. Each robot is a rational agent because it plans using A* search with the cost function f(n)=g(n)+h(n), where h(n) is Manhattan distance. To avoid collisions, I used prioritized planning with a time-space reservation table, so lower-priority robots treat higher-priority robots' future paths as obstacles. The simulation runs scenarios with 2, 5, and 10 agents, logs performance to [warehouse_performance.csv](/workspaces/CS6053/warehouse_performance.csv), and visualizes the coordinated movement in [warehouse_mapf.gif](/workspaces/CS6053/warehouse_mapf.gif).
+
+## Very Short Viva Answer
+
+If you need a shorter answer in a live discussion, say:
+
+This is a multi-agent warehouse planning system. Each robot plans a path to a pick location and back to the packing station using A*. The robots are rational because they choose low-cost action sequences based on the map and the future movements of other robots. Prioritized planning prevents collisions, and the CSV output provides evidence for performance evaluation.
+
 ## Run
 
 1. Install dependencies:
