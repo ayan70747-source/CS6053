@@ -614,13 +614,13 @@ def main() -> None:
         write_interactive_html(scenario_outputs=scenario_outputs, output_path=interactive_path)
         print(f"Saved interactive viewer to {interactive_path}")
 
-        demo_agents = 5
+        demo_agents = 10
         demo = scenario_outputs[demo_agents]
         fig, ani = create_animation(
                 env=demo["env"],
                 agents=demo["agents"],
                 timeline=demo["timeline"],
-                title="Warehouse MAPF Action Planning (5 Agents)",
+                title=f"Warehouse MAPF Action Planning ({demo_agents} Agents)",
         )
 
         gif_path = "warehouse_mapf.gif"
