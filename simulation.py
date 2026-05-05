@@ -23,6 +23,7 @@ and OBSTACLE_DENSITY at the top of this file.
 
 import random
 import time
+import json
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -308,6 +309,355 @@ def create_animation(env: WarehouseEnv, scenario_data: dict,
     return fig, ani
 
 
+def export_interactive_html(env: WarehouseEnv, scenario_data: dict,
+                                                        output_file: str = "warehouse_mapf_interactive.html",
+                                                        title: str = "Warehouse MAPF Interactive Viewer"):
+        """
+        Export a browser-based interactive animation with playback controls.
+
+        Controls include play/pause, frame stepping, reset, a timeline scrubber,
+        and speed adjustment.
+        """
+        robots = scenario_data["robots"]
+        results = scenario_data["results"]
+        n_robots = len(robots)
+        frames = build_frame_positions(results, n_robots)
+
+        data = {
+                "rows": env.rows,
+                "cols": env.cols,
+                "grid": env.grid.tolist(),
+                "frames": frames,
+                "robots": [
+                        {
+                                "id": robot.robot_id,
+                                "start": list(robot.start),
+                                "goal": list(robot.goal),
+                                "path_length": results[robot.robot_id]["path_length"],
+                                "planning_ms": round(results[robot.robot_id]["planning_time"] * 1000, 3),
+                                "color": ROBOT_COLOURS[robot.robot_id % len(ROBOT_COLOURS)],
+                        }
+                        for robot in robots
+                ],
+                "title": title,
+        }
+
+        template = """<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Warehouse MAPF Interactive Viewer</title>
+    <style>
+        :root {
+            --bg: #f8f4ea;
+            --panel: #fffef8;
+            --ink: #1f2937;
+            --accent: #0f766e;
+            --grid: #d1d5db;
+            --shelf: #8b6914;
+        }
+        body {
+            margin: 0;
+            font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+            background: radial-gradient(circle at 10% 10%, #fff6e1 0%, var(--bg) 45%, #efe8d5 100%);
+            color: var(--ink);
+        }
+        .wrap {
+            max-width: 1100px;
+            margin: 1.2rem auto;
+            padding: 0 1rem;
+            display: grid;
+            gap: 0.9rem;
+            grid-template-columns: 1fr;
+        }
+        .panel {
+            background: var(--panel);
+            border: 1px solid #d6d3d1;
+            border-radius: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            padding: 0.8rem;
+        }
+        .topbar {
+            display: flex;
+            gap: 0.8rem;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .title {
+            margin: 0;
+            font-size: 1.1rem;
+            letter-spacing: 0.2px;
+        }
+        canvas {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+            border: 1px solid #d1d5db;
+            background: #f3f4f6;
+            display: block;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 0.5rem;
+            align-items: center;
+            margin-top: 0.8rem;
+        }
+        button {
+            border: 1px solid #0f766e;
+            background: #f0fdfa;
+            color: #134e4a;
+            border-radius: 8px;
+            padding: 0.5rem 0.6rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        button:hover { filter: brightness(0.98); }
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+        .legend {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 0.35rem 0.75rem;
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid #111827;
+            flex-shrink: 0;
+        }
+        .stat {
+            font-variant-numeric: tabular-nums;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="panel">
+            <div class="topbar">
+                <h1 class="title" id="title"></h1>
+                <div class="stat" id="frameLabel"></div>
+            </div>
+            <canvas id="simCanvas" width="900" height="900"></canvas>
+            <div class="controls">
+                <button id="playPauseBtn">Pause</button>
+                <button id="prevBtn">Step -1</button>
+                <button id="nextBtn">Step +1</button>
+                <button id="resetBtn">Reset</button>
+                <label>Speed (fps)
+                    <input id="fpsSlider" type="range" min="1" max="15" value="5" />
+                </label>
+                <label>Timeline
+                    <input id="frameSlider" type="range" min="0" max="0" value="0" />
+                </label>
+            </div>
+            <div class="legend" id="legend"></div>
+        </div>
+    </div>
+
+    <script>
+        const data = __DATA_JSON__;
+
+        const canvas = document.getElementById("simCanvas");
+        const ctx = canvas.getContext("2d");
+        const titleEl = document.getElementById("title");
+        const frameLabelEl = document.getElementById("frameLabel");
+        const legendEl = document.getElementById("legend");
+
+        const playPauseBtn = document.getElementById("playPauseBtn");
+        const prevBtn = document.getElementById("prevBtn");
+        const nextBtn = document.getElementById("nextBtn");
+        const resetBtn = document.getElementById("resetBtn");
+        const fpsSlider = document.getElementById("fpsSlider");
+        const frameSlider = document.getElementById("frameSlider");
+
+        titleEl.textContent = data.title;
+        frameSlider.max = String(data.frames.length - 1);
+
+        for (const r of data.robots) {
+            const item = document.createElement("div");
+            item.className = "legend-item";
+            item.innerHTML = `<span class="swatch" style="background:${r.color}"></span>` +
+                                             `R${r.id}: ${r.start} -> ${r.goal} | len=${r.path_length} | ${r.planning_ms}ms`;
+            legendEl.appendChild(item);
+        }
+
+        let frame = 0;
+        let playing = true;
+        let fps = Number(fpsSlider.value);
+        let timer = null;
+
+        function starPath(cx, cy, outerR, innerR, points) {
+            let angle = -Math.PI / 2;
+            const step = Math.PI / points;
+            ctx.beginPath();
+            for (let i = 0; i < points * 2; i++) {
+                const r = i % 2 === 0 ? outerR : innerR;
+                const x = cx + Math.cos(angle) * r;
+                const y = cy + Math.sin(angle) * r;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+                angle += step;
+            }
+            ctx.closePath();
+        }
+
+        function draw() {
+            const rows = data.rows;
+            const cols = data.cols;
+            const w = canvas.width;
+            const h = canvas.height;
+            const cell = Math.min(w / cols, h / rows);
+
+            ctx.clearRect(0, 0, w, h);
+
+            // Floor
+            ctx.fillStyle = "#f9fafb";
+            ctx.fillRect(0, 0, cols * cell, rows * cell);
+
+            // Shelves
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    if (data.grid[r][c] === 1) {
+                        ctx.fillStyle = "#8b6914";
+                        ctx.fillRect(c * cell + 2, r * cell + 2, cell - 4, cell - 4);
+                    }
+                }
+            }
+
+            // Grid lines
+            ctx.strokeStyle = "#d1d5db";
+            ctx.lineWidth = 1;
+            for (let r = 0; r <= rows; r++) {
+                ctx.beginPath();
+                ctx.moveTo(0, r * cell);
+                ctx.lineTo(cols * cell, r * cell);
+                ctx.stroke();
+            }
+            for (let c = 0; c <= cols; c++) {
+                ctx.beginPath();
+                ctx.moveTo(c * cell, 0);
+                ctx.lineTo(c * cell, rows * cell);
+                ctx.stroke();
+            }
+
+            // Start markers and goal stars
+            for (const robot of data.robots) {
+                const [sr, sc] = robot.start;
+                const [gr, gc] = robot.goal;
+
+                ctx.fillStyle = robot.color + "99";
+                ctx.strokeStyle = "#111827";
+                ctx.lineWidth = 1;
+                ctx.fillRect(sc * cell + cell * 0.2, sr * cell + cell * 0.2, cell * 0.6, cell * 0.6);
+                ctx.strokeRect(sc * cell + cell * 0.2, sr * cell + cell * 0.2, cell * 0.6, cell * 0.6);
+
+                starPath(gc * cell + cell * 0.5, gr * cell + cell * 0.5, cell * 0.24, cell * 0.11, 5);
+                ctx.fillStyle = robot.color;
+                ctx.globalAlpha = 0.75;
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+                ctx.stroke();
+            }
+
+            // Robot positions at current frame
+            const positions = data.frames[frame];
+            for (let i = 0; i < data.robots.length; i++) {
+                const robot = data.robots[i];
+                const [rr, rc] = positions[i];
+                const cx = rc * cell + cell * 0.5;
+                const cy = rr * cell + cell * 0.5;
+
+                ctx.beginPath();
+                ctx.arc(cx, cy, cell * 0.32, 0, Math.PI * 2);
+                ctx.fillStyle = robot.color;
+                ctx.strokeStyle = "#111827";
+                ctx.lineWidth = 1.5;
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = "#ffffff";
+                ctx.font = `bold ${Math.max(11, Math.floor(cell * 0.3))}px sans-serif`;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(String(robot.id), cx, cy);
+            }
+
+            frameLabelEl.textContent = `t = ${frame} / ${data.frames.length - 1}`;
+            frameSlider.value = String(frame);
+        }
+
+        function tick() {
+            if (!playing) return;
+            frame = (frame + 1) % data.frames.length;
+            draw();
+        }
+
+        function restartTimer() {
+            if (timer) clearInterval(timer);
+            timer = setInterval(tick, Math.max(30, Math.floor(1000 / fps)));
+        }
+
+        playPauseBtn.addEventListener("click", () => {
+            playing = !playing;
+            playPauseBtn.textContent = playing ? "Pause" : "Play";
+        });
+
+        prevBtn.addEventListener("click", () => {
+            frame = (frame - 1 + data.frames.length) % data.frames.length;
+            draw();
+        });
+
+        nextBtn.addEventListener("click", () => {
+            frame = (frame + 1) % data.frames.length;
+            draw();
+        });
+
+        resetBtn.addEventListener("click", () => {
+            frame = 0;
+            draw();
+        });
+
+        fpsSlider.addEventListener("input", () => {
+            fps = Number(fpsSlider.value);
+            restartTimer();
+        });
+
+        frameSlider.addEventListener("input", () => {
+            frame = Number(frameSlider.value);
+            draw();
+        });
+
+        draw();
+        restartTimer();
+    </script>
+</body>
+</html>
+"""
+
+        html = template.replace("__DATA_JSON__", json.dumps(data))
+        with open(output_file, "w", encoding="utf-8") as f:
+                f.write(html)
+
+        return output_file
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -365,6 +715,14 @@ def main():
         writer = animation.PillowWriter(fps=5)
         ani.save(output_file, writer=writer)
         print("saved.")
+
+        html_file = export_interactive_html(
+            env,
+            demo_data,
+            output_file="warehouse_mapf_interactive.html",
+            title=f"Warehouse MAPF - {demo_n} Agents (Interactive)",
+        )
+        print(f"Interactive viewer saved to '{html_file}'.")
 
         plt.show()
 
