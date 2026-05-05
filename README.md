@@ -1,110 +1,103 @@
-# CS6053 – Multi-Agent Pathfinding (MAPF) Warehouse Simulation
+# CS6053 Topic 8: Action Planning
 
-A Python-based simulation where multiple **Rational Agents** (robots) retrieve
-items in a grid-based warehouse, demonstrating **Intelligent Behaviour** using
-the **A\* (A-Star) algorithm** with Prioritized Planning conflict resolution.
+This project implements a Multi-Agent Pathfinding (MAPF) warehouse simulation that demonstrates intelligent behaviour and rational decision-making with time-aware planning.
 
----
+## Architecture
 
-## Project Structure
+| File | Role |
+|---|---|
+| environment.py | WarehouseGrid using NumPy with cell encoding: 0 floor, 1 shelf, 2 packing station. Includes random pick-task generator. |
+| planner.py | Rational A* planner with cost function f(n)=g(n)+h(n), Manhattan heuristic, and prioritized planning with time-space occupancy. |
+| agent.py | RationalAgent with states: IDLE, MOVING_TO_PICK, MOVING_TO_DELIVERY. |
+| simulation.py | Runs automated scenarios for 2, 5, and 10 agents, performs execution loop, logs metrics, and renders animation. |
+| requirements.txt | Python dependencies. |
 
-| File | Purpose |
-|------|---------|
-| `environment.py` | Defines the `WarehouseEnv` class – a 2-D NumPy grid where `0` = floor and `1` = shelf obstacle |
-| `planner.py` | `Robot` class (rational agent), space–time A\* algorithm, `ReservationTable`, and `prioritized_plan` orchestrator |
-| `simulation.py` | Main script: runs 2/5/10-agent scenarios, prints metrics, and produces a Matplotlib animation |
-| `requirements.txt` | Python package dependencies |
-| `README.md` | This document |
+## Initial State
 
----
+1. Warehouse is generated with aisle-style shelf layout.
+2. Packing station is fixed in a walkable depot region.
+3. Agents spawn in walkable cells near the station.
+4. Each agent receives one pick location and must return to the station.
 
-## Quick Start
+## Actions
 
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+At each tick, valid actions are:
 
-# 2. Run the simulation
-python simulation.py
-```
+1. Move north
+2. Move south
+3. Move west
+4. Move east
+5. Wait in place
 
-The script will:
-1. Print per-agent metrics (path length, planning time) for 2, 5, and 10 agents.
-2. Print a scalability summary table.
-3. Save a `warehouse_mapf.gif` animation of the 5-agent scenario.
+## Transition Model
 
----
+The planner searches in space-time states:
 
-## How Agents Demonstrate Rationality and Intelligent Behaviour (CS6053 LO3 / LO4)
+State: (x, y, t)
 
-### PEAS Model (LO3 – Rational Agent Design)
+Transition:
 
-Each `Robot` is modelled as a **goal-based rational agent** using the PEAS
-framework:
+(x, y, t) -> (x', y', t+1)
 
-| Component | Description |
-|-----------|-------------|
-| **Performance Measure** | Minimise the number of steps to reach the goal without colliding |
-| **Environment** | A 2-D grid warehouse with static shelf obstacles (`WarehouseEnv`) |
-| **Actuators** | Move north / south / east / west, or wait in place |
-| **Sensors** | Current position, full grid layout, reservation table (other robots' plans) |
+Where (x', y') is either a walkable neighbour or the same cell for wait.
 
-### A\* Algorithm – Intelligent Search (LO4)
+## Rational Planning Logic
 
-The A\* algorithm is an **optimal, informed search** strategy:
+1. A* uses f(n)=g(n)+h(n).
+2. g(n) is elapsed path cost (one unit per tick).
+3. h(n) is Manhattan distance to the goal.
+4. Prioritized planning reserves higher-priority trajectories in time-space.
+5. Lower-priority agents treat reserved vertices and edge swaps as dynamic obstacles.
+6. Rationality proof in code:
+   - Wait is included as a legal action.
+   - The simulation tracks cases where waiting is selected and has lower/equal immediate f pressure than moving into a detour direction.
 
-* **g(n)** – actual cost from the start node to node *n* (number of steps taken).
-* **h(n)** – the **Manhattan Distance** heuristic from *n* to the goal.
-  Manhattan Distance is **admissible** (never over-estimates) on a
-  4-connected grid, so A\* is **guaranteed to find the shortest path**.
-* **f(n) = g(n) + h(n)** – the priority used by the min-heap open list.
+## Goal Test
 
-The search runs in **(time, row, col)** space, enabling it to plan around
-time-varying obstacles introduced by the reservation table.
+Simulation succeeds only if all agents satisfy both conditions:
 
-### Prioritized Planning – Conflict Resolution (LO4)
+1. State is IDLE.
+2. Position equals the packing station after completing pick and delivery.
 
-Multi-agent collision avoidance follows **Prioritized Planning**:
+## Performance Output (Section 6)
 
-1. Robots are sorted by ID (robot 0 = highest priority).
-2. The highest-priority robot plans first on the bare grid.
-3. Its chosen path is registered in a shared `ReservationTable` as
-   `(time_step, row, col)` tuples.
-4. Each subsequent (lower-priority) robot queries the table during A\* and
-   treats reserved cells as dynamic obstacles – it will **wait** one step or
-   **reroute** rather than enter a reserved cell.
-5. This guarantees that no two robots occupy the same cell at the same time.
+Running simulation.py automatically generates warehouse_performance.csv with columns:
 
-### Scalability
+1. Num_Agents
+2. Total_Steps_Taken
+3. Average_Path_Length
+4. Collisions_Avoided
+5. Computation_Time_MS
 
-| Agents | Avg Path Length | Total Planning Time |
-|--------|----------------|---------------------|
-| 2 | varies | < 10 ms |
-| 5 | varies | < 30 ms |
-| 10 | varies | < 100 ms |
+## Visualisation
 
-*(Exact values printed by `simulation.py` at runtime.)*
+Matplotlib animation displays:
 
----
+1. Shelves in warehouse-like aisle blocks
+2. Packing station tile
+3. Pick locations as stars
+4. Robots as coloured circles moving through time
 
-## Animation
+Output file: warehouse_mapf.gif
 
-The output GIF (`warehouse_mapf.gif`) shows:
-* **Grey cells** – navigable floor
-* **Brown rectangles** – shelves (obstacles)
-* **Coloured circles** – robots (ID shown inside)
-* **Stars** – goal positions
-* **Squares** – start positions
+## Original Contributions
 
-Each robot moves simultaneously, demonstrating the collision-free paths
-produced by Prioritized Planning.
+This implementation includes the following original contributions aligned with coursework expectations:
 
----
+1. A structured aisle-generation method that mimics realistic warehouse lane geometry instead of purely random obstacles.
+2. A two-leg per-agent mission model (start -> pick -> delivery) with explicit finite-state tracking.
+3. Time-space occupancy with both vertex and edge conflict handling to avoid head-on swap collisions.
+4. Explicit wait-vs-detour rationality tracking, logged as measurable planner behaviour.
+5. End-to-end automated experiment pipeline that directly writes CSV analysis data for report inclusion.
 
-## Dependencies
+## Run
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `numpy` | ≥ 1.24 | 2-D grid representation |
-| `matplotlib` | ≥ 3.7 | Animation and visualisation |
-| `Pillow` | ≥ 9.5 | GIF export via `PillowWriter` |
+1. Install dependencies:
+
+   pip install -r requirements.txt
+
+2. Execute simulation:
+
+   python simulation.py
+
+This runs all required scenarios (2, 5, 10 agents), prints metrics, exports warehouse_performance.csv, and saves warehouse_mapf.gif.

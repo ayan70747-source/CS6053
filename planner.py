@@ -1,300 +1,217 @@
-"""
-planner.py
-==========
-Contains the A* pathfinding algorithm and the Robot agent class.
+"""Rational A* planner with prioritized planning and time-space occupancy."""
 
-A* Algorithm
-------------
-A* is an informed search algorithm that combines:
-    g(n)  – actual cost from start to node n
-    h(n)  – heuristic estimate from n to goal  (Manhattan Distance here)
-    f(n)  = g(n) + h(n)                        (priority in the open list)
-
-Manhattan Distance heuristic is *admissible* (never over-estimates) on a
-4-connected grid, so A* is guaranteed to return the optimal path.
-
-Prioritized Planning (Conflict Resolution)
-------------------------------------------
-Robots are ranked by priority (lower index = higher priority).
-High-priority robots plan first on the static grid.
-Lower-priority robots receive a *reservation table* – a time-indexed set of
-cells already claimed by higher-priority robots.  When planning, a lower-
-priority robot treats those (time, cell) pairs as dynamic obstacles, so it
-waits or reroutes rather than collide.
-
-CS6053 LO4 – Rational Agent connection
----------------------------------------
-Each Robot is a goal-based rational agent:
-    • It perceives its environment (the grid + reservation table).
-    • It deliberates using A* to find the utility-maximising action sequence.
-    • Its optimality criterion is minimal path length (cost).
-"""
+from __future__ import annotations
 
 import heapq
-import time
-from typing import Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
-from environment import WarehouseEnv
+from agent import RationalAgent
+from environment import WarehouseGrid
 
 
-# ---------------------------------------------------------------------------
-# Heuristic
-# ---------------------------------------------------------------------------
-
-def manhattan_distance(a: tuple, b: tuple) -> int:
-    """Return the Manhattan distance between two (row, col) points."""
+def manhattan_distance(a: Tuple[int, int], b: Tuple[int, int]) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
-# ---------------------------------------------------------------------------
-# Reservation Table  (for Prioritized Planning)
-# ---------------------------------------------------------------------------
-
 class ReservationTable:
-    """
-    Records which (time_step, row, col) cells are already claimed by
-    higher-priority robots, so that lower-priority robots avoid them.
-    """
+    """Time-space occupancy for vertex and edge reservations."""
 
-    def __init__(self):
-        # Set of (time_step, row, col) tuples
-        self._reserved: set = set()
+    def __init__(self) -> None:
+        self.vertex_occ: set[Tuple[int, int, int]] = set()
+        self.edge_occ: set[Tuple[int, int, int, int, int]] = set()
 
-    def reserve(self, path: list):
-        """
-        Register every cell along *path* at the corresponding time step.
-        The robot is assumed to remain at its final cell for extra time steps
-        (to avoid tail collisions).
-
-        Parameters
-        ----------
-        path : list of (row, col)
-            Ordered list of positions from start to goal.
-        """
+    def reserve_path(self, path: List[Tuple[int, int]], start_time: int = 0, tail_hold: int = 8) -> None:
         if not path:
             return
-        for t, cell in enumerate(path):
-            self._reserved.add((t, cell[0], cell[1]))
-        # Reserve the goal cell for extra time to prevent follow-on collisions
-        goal = path[-1]
-        for extra in range(1, len(path) + 1):
-            self._reserved.add((len(path) - 1 + extra, goal[0], goal[1]))
 
-    def is_reserved(self, time_step: int, row: int, col: int) -> bool:
-        """Return True if the cell is already claimed at this time step."""
-        return (time_step, row, col) in self._reserved
+        for i, (r, c) in enumerate(path):
+            t = start_time + i
+            self.vertex_occ.add((t, r, c))
+            if i > 0:
+                pr, pc = path[i - 1]
+                self.edge_occ.add((t - 1, pr, pc, r, c))
+
+        gr, gc = path[-1]
+        end_t = start_time + len(path) - 1
+        for extra_t in range(1, tail_hold + 1):
+            self.vertex_occ.add((end_t + extra_t, gr, gc))
+
+    def is_vertex_reserved(self, t: int, r: int, c: int) -> bool:
+        return (t, r, c) in self.vertex_occ
+
+    def is_edge_conflict(self, t: int, r1: int, c1: int, r2: int, c2: int) -> bool:
+        return (t, r2, c2, r1, c1) in self.edge_occ
 
 
-# ---------------------------------------------------------------------------
-# A* implementation (space–time aware)
-# ---------------------------------------------------------------------------
+@dataclass
+class PlanResult:
+    path: List[Tuple[int, int]]
+    blocked_by_reservation: int
+    wait_steps_in_path: int
+    wait_better_than_detour: int
 
-def astar(env: WarehouseEnv,
-          start: tuple,
-          goal: tuple,
-          reservation: Optional[ReservationTable] = None,
-          max_time: int = 500) -> Optional[list]:
-    """
-    Find the shortest collision-free path from *start* to *goal* using A*.
 
-    The search operates in (time, row, col) space so that it can respect the
-    reservation table produced by higher-priority robots.
+class RationalAStarPlanner:
+    """Space-time A* planner with transition model (x,y,t)->(x',y',t+1)."""
 
-    Parameters
-    ----------
-    env : WarehouseEnv
-        The warehouse grid.
-    start : (row, col)
-        Starting cell.
-    goal : (row, col)
-        Target cell.
-    reservation : ReservationTable or None
-        If provided, the planner avoids (time, cell) entries in the table.
-    max_time : int
-        Hard cut-off on time steps to prevent infinite loops in crowded grids.
+    def __init__(self, max_time: int = 600):
+        self.max_time = max_time
 
-    Returns
-    -------
-    list of (row, col) or None
-        Ordered path from start to goal (inclusive), or None if unreachable.
-    """
-    if not env.is_valid(start[0], start[1]):
-        return None
-    if not env.is_valid(goal[0], goal[1]):
-        return None
+    def plan(
+        self,
+        env: WarehouseGrid,
+        start: Tuple[int, int],
+        goal: Tuple[int, int],
+        reservation: ReservationTable,
+        start_time: int = 0,
+    ) -> Optional[PlanResult]:
+        if not env.is_walkable(*start) or not env.is_walkable(*goal):
+            return None
 
-    # Priority queue entries: (f, g, time_step, position, parent)
-    # Using a counter as tie-breaker to keep the heap stable
-    counter = 0
-    open_heap = []
+        start_state = (start_time, start[0], start[1])
+        open_heap: List[Tuple[int, int, int, Tuple[int, int, int]]] = []
+        came_from: Dict[Tuple[int, int, int], Optional[Tuple[int, int, int]]] = {start_state: None}
+        g_cost: Dict[Tuple[int, int, int], int] = {start_state: 0}
 
-    # State: (time_step, row, col)
-    start_state = (0, start[0], start[1])
-    heapq.heappush(open_heap, (0, 0, counter, start_state, None))
+        blocked_by_reservation = 0
+        tie = 0
+        start_h = manhattan_distance(start, goal)
+        heapq.heappush(open_heap, (start_h, 0, tie, start_state))
 
-    # came_from maps state → parent_state
-    came_from = {start_state: None}
-    # g_cost maps state → cost-so-far
-    g_cost = {start_state: 0}
+        while open_heap:
+            _, cur_g, _, (t, r, c) = heapq.heappop(open_heap)
 
-    while open_heap:
-        # Heap entry: (f, g, tie_breaker, state, parent_state)
-        f, g, _tie, current_state, _parent = heapq.heappop(open_heap)
-        t, r, c = current_state
+            if (r, c) == goal:
+                path = self._reconstruct_path(came_from, (t, r, c))
+                waits, wait_better = self._evaluate_wait_decisions(path, goal)
+                return PlanResult(
+                    path=path,
+                    blocked_by_reservation=blocked_by_reservation,
+                    wait_steps_in_path=waits,
+                    wait_better_than_detour=wait_better,
+                )
 
-        # Goal test (position only – time doesn't matter at goal)
-        if (r, c) == goal:
-            return _reconstruct_path(came_from, current_state)
-
-        if t >= max_time:
-            continue
-
-        # Expand neighbours (move to adjacent cell or wait in place)
-        neighbours = list(env.get_neighbors(r, c)) + [(r, c)]  # include wait
-        for nr, nc in neighbours:
-            nt = t + 1
-            # Skip if another high-priority robot has reserved this cell
-            if reservation and reservation.is_reserved(nt, nr, nc):
+            if t - start_time >= self.max_time:
                 continue
 
-            new_state = (nt, nr, nc)
-            new_g = g + 1  # uniform cost (each step = 1)
+            candidate_moves = env.neighbors(r, c) + [(r, c)]
+            for nr, nc in candidate_moves:
+                nt = t + 1
 
-            if new_state not in g_cost or new_g < g_cost[new_state]:
-                g_cost[new_state] = new_g
-                h = manhattan_distance((nr, nc), goal)
-                new_f = new_g + h
-                counter += 1
-                heapq.heappush(open_heap,
-                               (new_f, new_g, counter, new_state, current_state))
-                came_from[new_state] = current_state
+                if reservation.is_vertex_reserved(nt, nr, nc):
+                    blocked_by_reservation += 1
+                    continue
+                if reservation.is_edge_conflict(t, r, c, nr, nc):
+                    blocked_by_reservation += 1
+                    continue
 
-    return None   # No path found
+                nxt = (nt, nr, nc)
+                ng = cur_g + 1
+                if nxt not in g_cost or ng < g_cost[nxt]:
+                    g_cost[nxt] = ng
+                    h = manhattan_distance((nr, nc), goal)
+                    f = ng + h
+                    tie += 1
+                    heapq.heappush(open_heap, (f, ng, tie, nxt))
+                    came_from[nxt] = (t, r, c)
 
+        return None
 
-def _reconstruct_path(came_from: dict, final_state: tuple) -> list:
-    """Walk back through the came_from dict to build the (row, col) path."""
-    path = []
-    state = final_state
-    while state is not None:
-        _, r, c = state
-        path.append((r, c))
-        state = came_from[state]
-    path.reverse()
-    return path
+    @staticmethod
+    def _reconstruct_path(
+        came_from: Dict[Tuple[int, int, int], Optional[Tuple[int, int, int]]],
+        end_state: Tuple[int, int, int],
+    ) -> List[Tuple[int, int]]:
+        path: List[Tuple[int, int]] = []
+        cur: Optional[Tuple[int, int, int]] = end_state
+        while cur is not None:
+            _, r, c = cur
+            path.append((r, c))
+            cur = came_from[cur]
+        path.reverse()
+        return path
 
+    @staticmethod
+    def _evaluate_wait_decisions(path: List[Tuple[int, int]], goal: Tuple[int, int]) -> Tuple[int, int]:
+        """Count waits and whether waiting improved immediate f(n) vs moving away."""
+        wait_steps = 0
+        wait_better = 0
 
-# ---------------------------------------------------------------------------
-# Robot  –  the rational agent
-# ---------------------------------------------------------------------------
+        for i in range(1, len(path)):
+            prev = path[i - 1]
+            cur = path[i]
+            if prev != cur:
+                continue
 
-class Robot:
-    """
-    A goal-based rational agent that navigates the warehouse using A*.
+            wait_steps += 1
+            wait_h = manhattan_distance(cur, goal)
 
-    Parameters
-    ----------
-    robot_id : int
-        Unique identifier (also determines priority – lower id = higher priority).
-    start : (row, col)
-        Initial position on the grid.
-    goal : (row, col)
-        Target cell the robot must reach.
-    env : WarehouseEnv
-        Shared environment reference.
-    """
+            detour_h = float("inf")
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = cur[0] + dr, cur[1] + dc
+                detour_h = min(detour_h, manhattan_distance((nr, nc), goal))
 
-    def __init__(self, robot_id: int, start: tuple,
-                 goal: tuple, env: WarehouseEnv):
-        self.robot_id = robot_id
-        self.start = start
-        self.goal = goal
-        self.env = env
+            if wait_h <= detour_h:
+                wait_better += 1
 
-        self.path: list = []          # Planned (row, col) path
-        self.path_length: int = 0     # Number of steps
-        self.planning_time: float = 0.0   # Wall-clock seconds for A*
-
-    # ------------------------------------------------------------------
-    # Planning
-    # ------------------------------------------------------------------
-
-    def plan(self, reservation: Optional[ReservationTable] = None):
-        """
-        Run A* to compute the path from start to goal, respecting the
-        reservation table of higher-priority robots.
-
-        Side-effects
-        ------------
-        Sets self.path, self.path_length, self.planning_time.
-
-        Returns
-        -------
-        list of (row, col) or None
-        """
-        t_start = time.perf_counter()
-        self.path = astar(self.env, self.start, self.goal, reservation)
-        self.planning_time = time.perf_counter() - t_start
-
-        if self.path is not None:
-            self.path_length = len(self.path) - 1   # steps = nodes - 1
-        else:
-            self.path_length = -1   # unreachable
-
-        return self.path
-
-    # ------------------------------------------------------------------
-    # Representation
-    # ------------------------------------------------------------------
-
-    def __repr__(self):
-        return (f"Robot(id={self.robot_id}, "
-                f"start={self.start}, goal={self.goal}, "
-                f"path_len={self.path_length})")
+        return wait_steps, wait_better
 
 
-# ---------------------------------------------------------------------------
-# Prioritized planner  –  orchestrates all robots
-# ---------------------------------------------------------------------------
-
-def prioritized_plan(robots: list, env: WarehouseEnv):
-    """
-    Run Prioritized Planning over *robots* (sorted by robot_id ascending,
-    so robot 0 is highest priority).
-
-    Algorithm
-    ---------
-    1. Sort robots by id (priority order).
-    2. Maintain a shared ReservationTable.
-    3. For each robot (high → low priority):
-       a. Plan with A*, consulting the reservation table.
-       b. If a path is found, register it in the reservation table.
-
-    Parameters
-    ----------
-    robots : list[Robot]
-        All robots to plan for.
-    env : WarehouseEnv
-        The shared environment.
-
-    Returns
-    -------
-    dict mapping robot_id → {'path', 'path_length', 'planning_time'}
-    """
+def prioritized_planning(
+    env: WarehouseGrid,
+    agents: List[RationalAgent],
+    planner: RationalAStarPlanner,
+) -> Dict[str, object]:
+    """Plan two-phase tasks with priority by agent_id and shared reservations."""
     reservation = ReservationTable()
-    results = {}
+    paths_by_agent: Dict[int, List[Tuple[int, int]]] = {}
+    stats = {
+        "collisions_avoided": 0,
+        "wait_steps": 0,
+        "wait_better_than_detour": 0,
+    }
 
-    # Sort by priority (robot_id ascending)
-    for robot in sorted(robots, key=lambda r: r.robot_id):
-        robot.plan(reservation)
+    for agent in sorted(agents, key=lambda a: a.agent_id):
+        if agent.pick_target is None or agent.delivery_target is None:
+            raise ValueError(f"Agent {agent.agent_id} missing task assignment.")
 
-        if robot.path:
-            reservation.reserve(robot.path)
+        first_leg = planner.plan(
+            env=env,
+            start=agent.current_pos,
+            goal=agent.pick_target,
+            reservation=reservation,
+            start_time=0,
+        )
+        if first_leg is None:
+            raise RuntimeError(f"No route to pick target for agent {agent.agent_id}.")
 
-        results[robot.robot_id] = {
-            "path": robot.path,
-            "path_length": robot.path_length,
-            "planning_time": robot.planning_time,
-        }
+        second_leg = planner.plan(
+            env=env,
+            start=first_leg.path[-1],
+            goal=agent.delivery_target,
+            reservation=reservation,
+            start_time=len(first_leg.path) - 1,
+        )
+        if second_leg is None:
+            raise RuntimeError(f"No route to delivery target for agent {agent.agent_id}.")
 
-    return results
+        full_path = first_leg.path + second_leg.path[1:]
+        agent.set_paths(first_leg.path, second_leg.path)
+        paths_by_agent[agent.agent_id] = full_path
+
+        reservation.reserve_path(full_path, start_time=0)
+
+        stats["collisions_avoided"] += (
+            first_leg.blocked_by_reservation + second_leg.blocked_by_reservation
+        )
+        stats["wait_steps"] += first_leg.wait_steps_in_path + second_leg.wait_steps_in_path
+        stats["wait_better_than_detour"] += (
+            first_leg.wait_better_than_detour + second_leg.wait_better_than_detour
+        )
+
+    return {
+        "paths": paths_by_agent,
+        "reservation": reservation,
+        "stats": stats,
+    }

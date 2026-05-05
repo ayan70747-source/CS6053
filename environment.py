@@ -1,91 +1,93 @@
-"""
-environment.py
-==============
-Defines the WarehouseEnv class that models a grid-based warehouse.
+"""Warehouse environment with aisle-like shelf layout and pick-task support."""
 
-Grid encoding
--------------
-    0  →  navigable floor cell
-    1  →  shelf (static obstacle – robots cannot enter)
+from __future__ import annotations
 
-CS6053 LO3 / Intelligent Behaviour context
--------------------------------------------
-The environment is the *percept source* for every rational agent.  By keeping
-the grid representation clean and centralised here, each Robot (planner.py)
-can query it as part of its PEAS model:
-    Performance measure  – shortest, collision-free path
-    Environment          – this 2-D grid
-    Actuators            – move commands (N / S / E / W)
-    Sensors              – current position + grid view
-"""
+import random
+from typing import List, Tuple
 
 import numpy as np
-import random
 
 
-class WarehouseEnv:
-    """
-    A 2-D grid warehouse with randomly placed shelf obstacles.
+FLOOR = 0
+SHELF = 1
+PACKING_STATION = 2
 
-    Parameters
-    ----------
-    rows : int
-        Number of rows in the grid.
-    cols : int
-        Number of columns in the grid.
-    obstacle_density : float
-        Fraction of cells that should be shelves (0.0 – 1.0).
-        Default is 0.20 (20 % of cells are shelves).
-    seed : int or None
-        Random seed for reproducible layouts.
-    """
 
-    def __init__(self, rows: int = 15, cols: int = 15,
-                 obstacle_density: float = 0.20, seed: int = 42):
+class WarehouseGrid:
+    """Grid-based warehouse where 0=floor, 1=shelf, 2=packing station."""
+
+    def __init__(self, rows: int = 18, cols: int = 24, seed: int = 42):
         self.rows = rows
         self.cols = cols
-        self.obstacle_density = obstacle_density
-
-        # Reproducible random layout
-        rng = random.Random(seed)
-
-        # Start with all floor cells
+        self.seed = seed
         self.grid = np.zeros((rows, cols), dtype=np.int8)
+        self.packing_station = (rows - 2, cols // 2)
+        self._build_aisles()
+        self.grid[self.packing_station] = PACKING_STATION
 
-        # Randomly place shelves while keeping enough open space
-        num_obstacles = int(rows * cols * obstacle_density)
-        all_cells = [(r, c) for r in range(rows) for c in range(cols)]
-        obstacle_cells = rng.sample(all_cells, num_obstacles)
-        for r, c in obstacle_cells:
-            self.grid[r][c] = 1
+    def _build_aisles(self) -> None:
+        """Create shelf islands with clear horizontal and vertical aisles."""
+        self.grid.fill(FLOOR)
+        self.grid[[0, self.rows - 1], :] = FLOOR
+        self.grid[:, [0, self.cols - 1]] = FLOOR
 
-    # ------------------------------------------------------------------
-    # Query helpers
-    # ------------------------------------------------------------------
+        for c in range(2, self.cols - 2, 4):
+            for r in range(2, self.rows - 3):
+                if r % 6 in (0, 1):
+                    continue
+                self.grid[r, c] = SHELF
+                if c + 1 < self.cols - 1:
+                    self.grid[r, c + 1] = SHELF
 
-    def is_valid(self, row: int, col: int) -> bool:
-        """Return True if (row, col) is inside the grid and not a shelf."""
-        return (0 <= row < self.rows and
-                0 <= col < self.cols and
-                self.grid[row][col] == 0)
+        station_r, station_c = self.packing_station
+        for rr in range(max(0, station_r - 1), min(self.rows, station_r + 2)):
+            for cc in range(max(0, station_c - 2), min(self.cols, station_c + 3)):
+                if self.grid[rr, cc] == SHELF:
+                    self.grid[rr, cc] = FLOOR
 
-    def get_neighbors(self, row: int, col: int):
-        """
-        Yield the four cardinal-direction neighbours of a cell that are
-        navigable (floor cells inside the grid boundary).
-        """
+    def is_walkable(self, row: int, col: int) -> bool:
+        if not (0 <= row < self.rows and 0 <= col < self.cols):
+            return False
+        return self.grid[row, col] in (FLOOR, PACKING_STATION)
+
+    def neighbors(self, row: int, col: int) -> List[Tuple[int, int]]:
+        out = []
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nr, nc = row + dr, col + dc
-            if self.is_valid(nr, nc):
-                yield (nr, nc)
+            if self.is_walkable(nr, nc):
+                out.append((nr, nc))
+        return out
 
-    def find_free_cells(self):
-        """Return a list of all floor cells as (row, col) tuples."""
-        return [(r, c)
-                for r in range(self.rows)
-                for c in range(self.cols)
-                if self.grid[r][c] == 0]
+    def floor_cells(self) -> List[Tuple[int, int]]:
+        return [
+            (r, c)
+            for r in range(self.rows)
+            for c in range(self.cols)
+            if self.grid[r, c] in (FLOOR, PACKING_STATION)
+        ]
 
-    def __repr__(self):
-        return (f"WarehouseEnv({self.rows}×{self.cols}, "
-                f"{int(self.obstacle_density * 100)}% shelves)")
+    def pickable_cells(self) -> List[Tuple[int, int]]:
+        """Return floor cells adjacent to at least one shelf (good pick points)."""
+        cells = []
+        for r in range(self.rows):
+            for c in range(self.cols):
+                if self.grid[r, c] not in (FLOOR, PACKING_STATION):
+                    continue
+                for nr, nc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    rr, cc = r + nr, c + nc
+                    if 0 <= rr < self.rows and 0 <= cc < self.cols and self.grid[rr, cc] == SHELF:
+                        cells.append((r, c))
+                        break
+        return [cell for cell in cells if cell != self.packing_station]
+
+    def generate_random_pick_tasks(self, num_tasks: int, rng: random.Random) -> List[Tuple[int, int]]:
+        """Generate unique random pick targets from aisle-adjacent floor cells."""
+        candidates = self.pickable_cells()
+        if len(candidates) < num_tasks:
+            raise ValueError(
+                f"Not enough pickable cells ({len(candidates)}) for {num_tasks} tasks."
+            )
+        return rng.sample(candidates, num_tasks)
+
+    def __repr__(self) -> str:
+        return f"WarehouseGrid(rows={self.rows}, cols={self.cols}, packing={self.packing_station})"
