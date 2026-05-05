@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import time
 from typing import Dict, List, Tuple
@@ -192,6 +193,387 @@ def create_animation(
         return fig, ani
 
 
+def write_interactive_html(scenario_outputs: Dict[int, Dict[str, object]], output_path: str) -> None:
+                """Write an interactive browser viewer with a scenario selector (2/5/10 agents)."""
+                interactive_data = {}
+                for num_agents, out in scenario_outputs.items():
+                                env: WarehouseGrid = out["env"]
+                                agents: List[RationalAgent] = out["agents"]
+                                timeline: Dict[int, List[Tuple[int, int]]] = out["timeline"]
+                                frames = build_animation_frames(timeline, len(agents))
+
+                                robots = []
+                                for agent in agents:
+                                                robots.append(
+                                                                {
+                                                                                "id": int(agent.agent_id),
+                                                                                "start": [int(agent.start_pos[0]), int(agent.start_pos[1])],
+                                                                                "goal": [int(agent.pick_target[0]), int(agent.pick_target[1])],
+                                                                                "path_length": int(max(0, len(agent.planned_path) - 1)),
+                                                                                "color": COLORS[agent.agent_id % len(COLORS)],
+                                                                }
+                                                )
+
+                                interactive_data[str(num_agents)] = {
+                                                "rows": int(env.rows),
+                                                "cols": int(env.cols),
+                                                "grid": [[int(v) for v in row] for row in env.grid.tolist()],
+                                                "frames": [[[int(r), int(c)] for (r, c) in frame] for frame in frames],
+                                                "robots": robots,
+                                                "title": f"Warehouse MAPF - {num_agents} Agents (Interactive)",
+                                }
+
+                html = f"""<!doctype html>
+<html lang=\"en\"> 
+<head>
+        <meta charset=\"utf-8\" />
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+        <title>Warehouse MAPF Interactive Viewer</title>
+        <style>
+                :root {{
+                        --bg: #f8f4ea;
+                        --panel: #fffef8;
+                        --ink: #1f2937;
+                        --accent: #0f766e;
+                        --grid: #d1d5db;
+                        --shelf: #8b6914;
+                }}
+                body {{
+                        margin: 0;
+                        font-family: \"Trebuchet MS\", \"Segoe UI\", sans-serif;
+                        background: radial-gradient(circle at 10% 10%, #fff6e1 0%, var(--bg) 45%, #efe8d5 100%);
+                        color: var(--ink);
+                }}
+                .wrap {{
+                        max-width: 1100px;
+                        margin: 1.2rem auto;
+                        padding: 0 1rem;
+                        display: grid;
+                        gap: 0.9rem;
+                        grid-template-columns: 1fr;
+                }}
+                .panel {{
+                        background: var(--panel);
+                        border: 1px solid #d6d3d1;
+                        border-radius: 14px;
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+                        padding: 0.8rem;
+                }}
+                .topbar {{
+                        display: flex;
+                        gap: 0.8rem;
+                        align-items: center;
+                        justify-content: space-between;
+                        flex-wrap: wrap;
+                }}
+                .title {{
+                        margin: 0;
+                        font-size: 1.1rem;
+                        letter-spacing: 0.2px;
+                }}
+                .topbar-controls {{
+                        display: flex;
+                        align-items: center;
+                        gap: 0.6rem;
+                        font-size: 0.9rem;
+                }}
+                select {{
+                        border: 1px solid #0f766e;
+                        background: #f0fdfa;
+                        color: #134e4a;
+                        border-radius: 8px;
+                        padding: 0.35rem 0.45rem;
+                        font-weight: 700;
+                        cursor: pointer;
+                }}
+                canvas {{
+                        width: 100%;
+                        height: auto;
+                        border-radius: 10px;
+                        border: 1px solid #d1d5db;
+                        background: #f3f4f6;
+                        display: block;
+                }}
+                .controls {{
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                        gap: 0.5rem;
+                        align-items: center;
+                        margin-top: 0.8rem;
+                }}
+                button {{
+                        border: 1px solid #0f766e;
+                        background: #f0fdfa;
+                        color: #134e4a;
+                        border-radius: 8px;
+                        padding: 0.5rem 0.6rem;
+                        font-weight: 700;
+                        cursor: pointer;
+                }}
+                button:hover {{ filter: brightness(0.98); }}
+                input[type=\"range\"] {{
+                        width: 100%;
+                        accent-color: var(--accent);
+                }}
+                .legend {{
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                        gap: 0.35rem 0.75rem;
+                        margin-top: 0.5rem;
+                        font-size: 0.85rem;
+                }}
+                .legend-item {{
+                        display: flex;
+                        align-items: center;
+                        gap: 0.4rem;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                }}
+                .swatch {{
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 50%;
+                        border: 1px solid #111827;
+                        flex-shrink: 0;
+                }}
+                .stat {{
+                        font-variant-numeric: tabular-nums;
+                        font-size: 0.9rem;
+                }}
+        </style>
+</head>
+<body>
+        <div class=\"wrap\">
+                <div class=\"panel\">
+                        <div class=\"topbar\">
+                                <h1 class=\"title\" id=\"title\"></h1>
+                                <div class=\"topbar-controls\">
+                                        <label for=\"scenarioSelect\">Scenario</label>
+                                        <select id=\"scenarioSelect\"></select>
+                                        <div class=\"stat\" id=\"frameLabel\"></div>
+                                </div>
+                        </div>
+                        <canvas id=\"simCanvas\" width=\"900\" height=\"900\"></canvas>
+                        <div class=\"controls\">
+                                <button id=\"playPauseBtn\">Pause</button>
+                                <button id=\"prevBtn\">Step -1</button>
+                                <button id=\"nextBtn\">Step +1</button>
+                                <button id=\"resetBtn\">Reset</button>
+                                <label>Speed (fps)
+                                        <input id=\"fpsSlider\" type=\"range\" min=\"1\" max=\"15\" value=\"5\" />
+                                </label>
+                                <label>Timeline
+                                        <input id=\"frameSlider\" type=\"range\" min=\"0\" max=\"0\" value=\"0\" />
+                                </label>
+                        </div>
+                        <div class=\"legend\" id=\"legend\"></div>
+                </div>
+        </div>
+
+        <script>
+                const scenarios = {json.dumps(interactive_data)};
+                const scenarioKeys = Object.keys(scenarios).map(Number).sort((a, b) => a - b);
+
+                const canvas = document.getElementById("simCanvas");
+                const ctx = canvas.getContext("2d");
+                const titleEl = document.getElementById("title");
+                const frameLabelEl = document.getElementById("frameLabel");
+                const legendEl = document.getElementById("legend");
+                const scenarioSelect = document.getElementById("scenarioSelect");
+
+                const playPauseBtn = document.getElementById("playPauseBtn");
+                const prevBtn = document.getElementById("prevBtn");
+                const nextBtn = document.getElementById("nextBtn");
+                const resetBtn = document.getElementById("resetBtn");
+                const fpsSlider = document.getElementById("fpsSlider");
+                const frameSlider = document.getElementById("frameSlider");
+
+                let data = scenarios[String(scenarioKeys[0])];
+                let frame = 0;
+                let playing = true;
+                let fps = Number(fpsSlider.value);
+                let timer = null;
+
+                for (const n of scenarioKeys) {{
+                        const opt = document.createElement("option");
+                        opt.value = String(n);
+                        opt.textContent = `${{n}} agents`;
+                        scenarioSelect.appendChild(opt);
+                }}
+
+                function rebuildLegend() {{
+                        legendEl.innerHTML = "";
+                        for (const r of data.robots) {{
+                                const item = document.createElement("div");
+                                item.className = "legend-item";
+                                item.innerHTML = `<span class=\"swatch\" style=\"background:${{r.color}}\"></span>` +
+                                                                 `R${{r.id}}: ${{r.start}} -> ${{r.goal}} | len=${{r.path_length}}`;
+                                legendEl.appendChild(item);
+                        }}
+                }}
+
+                function setScenario(key) {{
+                        data = scenarios[String(key)];
+                        frame = 0;
+                        titleEl.textContent = data.title;
+                        frameSlider.max = String(data.frames.length - 1);
+                        frameSlider.value = "0";
+                        rebuildLegend();
+                        draw();
+                }}
+
+                function starPath(cx, cy, outerR, innerR, points) {{
+                        let angle = -Math.PI / 2;
+                        const step = Math.PI / points;
+                        ctx.beginPath();
+                        for (let i = 0; i < points * 2; i++) {{
+                                const r = i % 2 === 0 ? outerR : innerR;
+                                const x = cx + Math.cos(angle) * r;
+                                const y = cy + Math.sin(angle) * r;
+                                if (i === 0) ctx.moveTo(x, y);
+                                else ctx.lineTo(x, y);
+                                angle += step;
+                        }}
+                        ctx.closePath();
+                }}
+
+                function draw() {{
+                        const rows = data.rows;
+                        const cols = data.cols;
+                        const w = canvas.width;
+                        const h = canvas.height;
+                        const cell = Math.min(w / cols, h / rows);
+
+                        ctx.clearRect(0, 0, w, h);
+
+                        ctx.fillStyle = "#f9fafb";
+                        ctx.fillRect(0, 0, cols * cell, rows * cell);
+
+                        for (let r = 0; r < rows; r++) {{
+                                for (let c = 0; c < cols; c++) {{
+                                        if (data.grid[r][c] === 1) {{
+                                                ctx.fillStyle = "#8b6914";
+                                                ctx.fillRect(c * cell + 2, r * cell + 2, cell - 4, cell - 4);
+                                        }}
+                                }}
+                        }}
+
+                        ctx.strokeStyle = "#d1d5db";
+                        ctx.lineWidth = 1;
+                        for (let r = 0; r <= rows; r++) {{
+                                ctx.beginPath();
+                                ctx.moveTo(0, r * cell);
+                                ctx.lineTo(cols * cell, r * cell);
+                                ctx.stroke();
+                        }}
+                        for (let c = 0; c <= cols; c++) {{
+                                ctx.beginPath();
+                                ctx.moveTo(c * cell, 0);
+                                ctx.lineTo(c * cell, rows * cell);
+                                ctx.stroke();
+                        }}
+
+                        for (const robot of data.robots) {{
+                                const [sr, sc] = robot.start;
+                                const [gr, gc] = robot.goal;
+
+                                ctx.fillStyle = robot.color + "99";
+                                ctx.strokeStyle = "#111827";
+                                ctx.lineWidth = 1;
+                                ctx.fillRect(sc * cell + cell * 0.2, sr * cell + cell * 0.2, cell * 0.6, cell * 0.6);
+                                ctx.strokeRect(sc * cell + cell * 0.2, sr * cell + cell * 0.2, cell * 0.6, cell * 0.6);
+
+                                starPath(gc * cell + cell * 0.5, gr * cell + cell * 0.5, cell * 0.24, cell * 0.11, 5);
+                                ctx.fillStyle = robot.color;
+                                ctx.globalAlpha = 0.75;
+                                ctx.fill();
+                                ctx.globalAlpha = 1.0;
+                                ctx.stroke();
+                        }}
+
+                        const positions = data.frames[frame];
+                        for (let i = 0; i < data.robots.length; i++) {{
+                                const robot = data.robots[i];
+                                const [rr, rc] = positions[i];
+                                const cx = rc * cell + cell * 0.5;
+                                const cy = rr * cell + cell * 0.5;
+
+                                ctx.beginPath();
+                                ctx.arc(cx, cy, cell * 0.32, 0, Math.PI * 2);
+                                ctx.fillStyle = robot.color;
+                                ctx.strokeStyle = "#111827";
+                                ctx.lineWidth = 1.5;
+                                ctx.fill();
+                                ctx.stroke();
+
+                                ctx.fillStyle = "#ffffff";
+                                ctx.font = `bold ${{Math.max(11, Math.floor(cell * 0.3))}}px sans-serif`;
+                                ctx.textAlign = "center";
+                                ctx.textBaseline = "middle";
+                                ctx.fillText(String(robot.id), cx, cy);
+                        }}
+
+                        frameLabelEl.textContent = `t = ${{frame}} / ${{data.frames.length - 1}}`;
+                        frameSlider.value = String(frame);
+                }}
+
+                function tick() {{
+                        if (!playing) return;
+                        frame = (frame + 1) % data.frames.length;
+                        draw();
+                }}
+
+                function restartTimer() {{
+                        if (timer) clearInterval(timer);
+                        timer = setInterval(tick, Math.max(30, Math.floor(1000 / fps)));
+                }}
+
+                scenarioSelect.addEventListener("change", () => {{
+                        setScenario(Number(scenarioSelect.value));
+                }});
+
+                playPauseBtn.addEventListener("click", () => {{
+                        playing = !playing;
+                        playPauseBtn.textContent = playing ? "Pause" : "Play";
+                }});
+
+                prevBtn.addEventListener("click", () => {{
+                        frame = (frame - 1 + data.frames.length) % data.frames.length;
+                        draw();
+                }});
+
+                nextBtn.addEventListener("click", () => {{
+                        frame = (frame + 1) % data.frames.length;
+                        draw();
+                }});
+
+                resetBtn.addEventListener("click", () => {{
+                        frame = 0;
+                        draw();
+                }});
+
+                fpsSlider.addEventListener("input", () => {{
+                        fps = Number(fpsSlider.value);
+                        restartTimer();
+                }});
+
+                frameSlider.addEventListener("input", () => {{
+                        frame = Number(frameSlider.value);
+                        draw();
+                }});
+
+                scenarioSelect.value = String(scenarioKeys[0]);
+                setScenario(scenarioKeys[0]);
+                restartTimer();
+        </script>
+</body>
+</html>
+"""
+                with open(output_path, "w", encoding="utf-8") as f:
+                                f.write(html)
+
+
 def main() -> None:
         print("=" * 70)
         print("CS6053 MAPF Warehouse Simulation (Rational A* + Prioritized Planning)")
@@ -227,6 +609,10 @@ def main() -> None:
         df.to_csv(csv_path, index=False)
         print(f"Saved performance data to {csv_path}")
         print(df.to_string(index=False))
+
+        interactive_path = "warehouse_mapf_interactive.html"
+        write_interactive_html(scenario_outputs=scenario_outputs, output_path=interactive_path)
+        print(f"Saved interactive viewer to {interactive_path}")
 
         demo_agents = 5
         demo = scenario_outputs[demo_agents]

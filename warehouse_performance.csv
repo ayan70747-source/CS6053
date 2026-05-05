@@ -1,4 +1,4 @@
 Num_Agents,Total_Steps_Taken,Average_Path_Length,Collisions_Avoided,Computation_Time_MS
-2,22,15.0,0,0.566
-5,38,26.8,19,1.897
-10,86,46.5,2085,271.692
+2,22,15.0,0,0.555
+5,38,26.8,19,1.908
+10,86,46.5,2085,279.305
