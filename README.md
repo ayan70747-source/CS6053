@@ -1,85 +1,95 @@
-# CS6053 Topic 8: Action Planning
+# CS6053 Topic 8: Action Planning — Group 16
 
-This project implements a Multi-Agent Pathfinding (MAPF) warehouse simulation that demonstrates intelligent behaviour and rational decision-making with time-aware planning.
+For this project we built a Multi-Agent Pathfinding (MAPF) simulation set inside a warehouse. The idea was to show how multiple robots can plan and carry out tasks intelligently without bumping into each other. Each robot has a job: go pick up an item from a shelf and bring it back to the packing station. The interesting part is getting them all to do this at the same time without conflicts.
 
-## Architecture
+## What each file does
 
-| File | Role |
+| File | What we wrote it to do |
 |---|---|
-| environment.py | WarehouseGrid using NumPy with cell encoding: 0 floor, 1 shelf, 2 packing station. Includes random pick-task generator. |
-| planner.py | Rational A* planner with cost function f(n)=g(n)+h(n), Manhattan heuristic, and prioritized planning with time-space occupancy. |
-| agent.py | RationalAgent with states: IDLE, MOVING_TO_PICK, MOVING_TO_DELIVERY. |
-| simulation.py | Runs automated scenarios for 2, 5, and 10 agents, performs execution loop, logs metrics, and renders animation. |
-| requirements.txt | Python dependencies. |
+| `environment.py` | Builds the warehouse grid using NumPy. Cells are encoded as 0 (floor), 1 (shelf), or 2 (packing station). It also randomly generates pick tasks for each robot. |
+| `planner.py` | This is where the A* planning happens. We use f(n) = g(n) + h(n) with Manhattan distance as the heuristic, and we handle conflicts between robots using prioritised planning in space-time. |
+| `agent.py` | Manages each robot's state — it can be IDLE, MOVING_TO_PICK, or MOVING_TO_DELIVERY. |
+| `simulation.py` | Runs three experiments (2, 5, and 10 robots), collects performance data, and produces the animation. |
+| `requirements.txt` | Python packages needed to run everything. |
 
-## Initial State
+## How the simulation starts
 
-1. Warehouse is generated with aisle-style shelf layout.
-2. Packing station is fixed in a walkable depot region.
-3. Agents spawn in walkable cells near the station.
-4. Each agent receives one pick location and must return to the station.
+When the simulation begins:
 
-## Actions
+1. A warehouse is generated with shelves arranged in proper aisles, not just random blocks.
+2. The packing station is placed in a fixed walkable area near the bottom of the grid.
+3. Robots spawn in walkable cells close to the station.
+4. Each robot is assigned one pick location and needs to go get it and come back.
 
-At each tick, valid actions are:
+## What a robot can actually do at each step
+
+At every tick, a robot chooses one of five actions:
 
 1. Move north
 2. Move south
 3. Move west
 4. Move east
-5. Wait in place
+5. Wait in place (this is more important than it sounds — see below)
 
-## Transition Model
+## How the planner thinks about movement
 
-The planner searches in space-time states:
+Rather than just planning in 2D space, we plan in space-time. Each state the planner considers is:
 
-State: (x, y, t)
+```
+(x, y, t)
+```
 
-Transition:
+And each transition looks like:
 
-(x, y, t) -> (x', y', t+1)
+```
+(x, y, t) → (x', y', t+1)
+```
 
-Where (x', y') is either a walkable neighbour or the same cell for wait.
+where (x', y') is either a neighbouring walkable cell or the same cell if the robot waits. This lets the planner reason about *when* a robot will be somewhere, not just *where*.
 
-## Rational Planning Logic
+## How robots avoid each other
 
-1. A* uses f(n)=g(n)+h(n).
-2. g(n) is elapsed path cost (one unit per tick).
-3. h(n) is Manhattan distance to the goal.
-4. Prioritized planning reserves higher-priority trajectories in time-space.
-5. Lower-priority agents treat reserved vertices and edge swaps as dynamic obstacles.
-6. Rationality proof in code:
-   - Wait is included as a legal action.
-   - The simulation tracks cases where waiting is selected and has lower/equal immediate f pressure than moving into a detour direction.
+We use prioritised planning. The first robot plans freely. The second robot then treats the first robot's future positions as obstacles, and so on. We handle two types of conflicts:
 
-## Goal Test
+- **Vertex conflicts** — two robots trying to be in the same cell at the same time.
+- **Edge conflicts** — two robots trying to swap positions in a single tick (which would mean they pass through each other).
 
-Simulation succeeds only if all agents satisfy both conditions:
+The rationality bit we wanted to highlight: waiting is a first-class action. When a robot chooses to wait rather than take a detour, we log that decision. It shows the robot genuinely evaluated its options and decided waiting was cheaper.
 
-1. State is IDLE.
-2. Position equals the packing station after completing pick and delivery.
+## When does the simulation consider itself done?
 
-## Performance Output (Section 6)
+Every robot has to satisfy two things before we declare success:
 
-Running simulation.py automatically generates warehouse_performance.csv with columns:
+1. Its state is IDLE.
+2. It is physically sitting on the packing station cell.
 
-1. Num_Agents
-2. Total_Steps_Taken
-3. Average_Path_Length
-4. Collisions_Avoided
-5. Computation_Time_MS
+Both conditions have to be true. A robot that never made it back does not count.
 
-## Interactive Visualisation (Local Browser)
+## Performance data
 
-The file `warehouse_mapf_interactive.html` is a fully self-contained interactive viewer. All simulation data is embedded inside the file — no server, no Python, and no internet connection is required.
+Running `simulation.py` writes a file called `warehouse_performance.csv`. The columns are:
 
-### How to open it
+| Column | What it measures |
+|---|---|
+| `Num_Agents` | How many robots were in that run |
+| `Total_Steps_Taken` | Total ticks across all robots |
+| `Average_Path_Length` | Mean path length per robot |
+| `Collisions_Avoided` | How many potential conflicts the planner stepped around |
+| `Computation_Time_MS` | How long the planning took in milliseconds |
 
-**Option 1 — Double-click (simplest)**
+We ran this for 2, 5, and 10 robots so we could compare how the planner scales.
 
-Open your file explorer, navigate to the project folder, and double-click `warehouse_mapf_interactive.html`. It will open in your default web browser.
+## Viewing the simulation interactively (open in your browser)
 
-**Option 2 — From the terminal**
+We built an interactive HTML viewer so you can step through the simulation at your own pace. Everything is embedded in a single file — `warehouse_mapf_interactive.html` — so there is nothing extra to install and no internet needed.
+
+### Opening the file
+
+**The simplest way — just double-click it**
+
+Find `warehouse_mapf_interactive.html` in the project folder and double-click it. It should open straight in your browser.
+
+**From the terminal**
 
 ```bash
 # macOS
@@ -88,116 +98,94 @@ open warehouse_mapf_interactive.html
 # Linux
 xdg-open warehouse_mapf_interactive.html
 
-# Windows (Command Prompt or PowerShell)
+# Windows
 start warehouse_mapf_interactive.html
 ```
 
-**Option 3 — Python one-liner local server (use if Option 1/2 fails)**
+**If the page loads blank — use a local server**
 
-Some browsers block file:// resources. Running a tiny local server fixes this:
+Some browsers block local file access for security reasons. If you see a blank page, run this instead:
 
 ```bash
-# Python 3
 python -m http.server 8000
 ```
 
-Then open your browser and go to:
+Then go to:
 
 ```
 http://localhost:8000/warehouse_mapf_interactive.html
 ```
 
-Press `Ctrl+C` in the terminal to stop the server when done.
+Hit `Ctrl+C` when you are done to shut the server down.
 
-### Selecting a scenario
+### Switching between scenarios
 
-A dropdown at the top of the page lets you switch between the three pre-computed scenarios:
+There is a dropdown at the top of the page. Use it to pick between the three runs we recorded:
 
-| Scenario | Agents |
+| Option | What you are looking at |
 |---|---|
-| 2 Agents | 2 robots navigating to their pick goals |
-| 5 Agents | 5 robots with prioritised planning |
-| 10 Agents | 10 robots demonstrating conflict avoidance |
+| 2 Agents | The simplest case — two robots finding paths without getting in each other's way |
+| 5 Agents | Mid-scale — you can start to see the planner making robots wait for each other |
+| 10 Agents | The busiest run — lots of conflict avoidance happening |
 
-Select a scenario from the dropdown and the grid reloads automatically.
+### Controls
 
-### Playback controls
-
-| Control | What it does |
+| Button / Slider | What it does |
 |---|---|
-| **Pause / Play** | Toggles the animation on and off |
-| **Step -1** | Moves the simulation back by one tick |
-| **Step +1** | Advances the simulation forward by one tick |
-| **Reset** | Returns the simulation to tick 0 |
-| **Speed (fps) slider** | Sets playback speed from 1 to 15 frames per second |
-| **Frame scrubber** | Drag to jump directly to any tick in the simulation |
+| **Pause / Play** | Stops or starts the animation |
+| **Step -1** | Goes back one tick |
+| **Step +1** | Goes forward one tick |
+| **Reset** | Jumps back to the very start |
+| **Speed (fps) slider** | Drag left to slow down, right to speed up (1–15 fps) |
+| **Frame scrubber** | Drag to jump to any specific tick |
 
-### Reading the visualisation
+We recommend pausing and stepping through tick by tick if you want to see exactly how a robot decides to wait rather than move.
 
-| Element | Meaning |
+### What you are looking at on the grid
+
+| Visual element | What it represents |
 |---|---|
-| Dark grey blocks | Shelf obstacles |
-| Light cell | Floor (walkable aisle) |
-| Green tile | Packing station (delivery goal) |
-| Star marker | Pick-up location for each robot |
-| Coloured circle | Robot (each robot has a unique colour) |
-| Circle at packing station | Robot has completed its mission |
+| Dark grey blocks | Shelf obstacles (robots cannot enter these) |
+| Light/white cells | Walkable floor aisles |
+| Green tile | The packing station — where every robot needs to end up |
+| Star marker | The pick-up location assigned to a robot |
+| Coloured circle | A robot (each one has its own colour) |
+| Circle resting on the green tile | That robot has finished its job |
 
-### Troubleshooting
+### Quick fixes
 
-- **Blank page or nothing renders** — Try Option 3 (Python server) above. Some browsers restrict loading from the `file://` protocol.
-- **Animation is too fast or too slow** — Adjust the Speed (fps) slider.
-- **Want to inspect a specific moment** — Pause the animation, then use Step -1 / Step +1 or drag the frame scrubber.
+- **Blank page** — Use the Python server method above.
+- **Too fast to follow** — Drag the speed slider to the left or just use Step +1 to go one frame at a time.
+- **Want to look at a specific moment** — Pause first, then use the step buttons or drag the frame scrubber.
 
 ---
 
-## Visualisation (Static GIF)
+## Static GIF output
 
-Matplotlib animation displays:
+If you just want a quick overview without opening the HTML, running `simulation.py` also produces `warehouse_mapf.gif` which shows:
 
-1. Shelves in warehouse-like aisle blocks
-2. Packing station tile
-3. Pick locations as stars
-4. Robots as coloured circles moving through time
+- The shelf layout
+- The packing station
+- Pick locations marked as stars
+- Each robot as a coloured circle moving through the warehouse
 
-Output file: warehouse_mapf.gif
+## What we built ourselves
 
-## Original Contributions
+We want to be upfront about what is original work here rather than just using a textbook A* implementation:
 
-This implementation includes the following original contributions aligned with coursework expectations:
+1. **Aisle-style warehouse generation** — we wrote a method that creates realistic-looking warehouse aisles rather than scattering random obstacles. The geometry actually looks like a warehouse.
+2. **Two-leg mission per robot** — each robot has a proper start → pick → delivery lifecycle tracked with explicit states, not just a single goal.
+3. **Edge conflict detection** — on top of the standard vertex conflict check, we also catch swap collisions (where two robots would pass through each other in one tick). This required tracking pairs of (current, next) positions across all robots at each timestep.
+4. **Wait-vs-detour logging** — we log every time a robot chooses to wait, along with the f-cost comparison that led to that choice. This gives us concrete evidence of rational behaviour rather than just asserting it.
+5. **Automated experiment pipeline** — the whole thing runs end to end and writes the CSV itself. We did not manually record any of the performance numbers.
 
-1. A structured aisle-generation method that mimics realistic warehouse lane geometry instead of purely random obstacles.
-2. A two-leg per-agent mission model (start -> pick -> delivery) with explicit finite-state tracking.
-3. Time-space occupancy with both vertex and edge conflict handling to avoid head-on swap collisions.
-4. Explicit wait-vs-detour rationality tracking, logged as measurable planner behaviour.
-5. End-to-end automated experiment pipeline that directly writes CSV analysis data for report inclusion.
+## What is actually happening when you watch it
 
-## What Is Happening In The Simulation
+Every robot in the simulation is doing the same two-stage job: go to your pick location, then come back to the packing station. They are not just animated — they planned their full path before the animation starts.
 
-The simulation models an automated warehouse in which multiple robots must complete a two-stage task:
+The planning is done in `planner.py`, the state of each robot is tracked in `agent.py`, the grid is in `environment.py`, and `simulation.py` ties it all together and runs the experiments.
 
-1. Start from a depot-side location.
-2. Travel to a pick cell beside a shelf.
-3. Collect the item.
-4. Return the item to the packing station.
-
-The warehouse layout is created in [environment.py](/workspaces/CS6053/environment.py), each robot's state is managed in [agent.py](/workspaces/CS6053/agent.py), the planning logic is implemented in [planner.py](/workspaces/CS6053/planner.py), and the full experiment loop is run in [simulation.py](/workspaces/CS6053/simulation.py).
-
-The animation is not random movement. It is the visual result of a planning process where each robot computes a legal action sequence before execution.
-
-## Why This Demonstrates Intelligent Behaviour
-
-The project demonstrates intelligent behaviour because every robot is goal-directed and evaluates actions using informed search rather than fixed rules.
-
-You can explain the intelligence like this:
-
-1. Each agent has a clear goal: reach a pick location and then return to the packing station.
-2. Each agent reasons about future outcomes using A* search instead of moving greedily.
-3. The planner works in space and time, so it reasons about where robots will be and when they will be there.
-4. Lower-priority robots adapt their plans around higher-priority robots' reserved future paths.
-5. Waiting is treated as a rational action when immediate movement would create a conflict or a worse route.
-
-This means the system is not just animated movement. It is a decision-making system that chooses actions with respect to goals, costs, and constraints.
+The key thing to understand is that the robots are not reacting moment to moment. By the time the animation plays, every robot already knows every step it is going to take. The interesting decisions happened during planning, and the metrics in the CSV reflect how well that planning went at different scales.
 
 ## Why The Agents Are Rational
 
