@@ -229,39 +229,6 @@ The explanation to give is:
 
 This is why the robots appear coordinated even though each one plans its own route.
 
-## What To Show The Professor
-
-During a demo, the clearest flow is:
-
-1. Show the animation in [warehouse_mapf.gif](/workspaces/CS6053/warehouse_mapf.gif).
-2. Explain the map symbols:
-   - Brown blocks are shelves.
-   - The packing station is the delivery point.
-   - Stars are pick targets.
-   - Coloured circles are robots.
-3. Explain the task sequence: each robot goes from start to pick, then from pick to delivery.
-4. Explain that the paths are computed by Rational A* and not manually scripted.
-5. Show [warehouse_performance.csv](/workspaces/CS6053/warehouse_performance.csv) as the evidence for performance analysis.
-
-## What To Emphasise In The Report Or Viva
-
-If asked what the project proves, focus on these points:
-
-1. It demonstrates action planning because the system generates full action sequences over time.
-2. It demonstrates rationality because each agent selects actions that minimize estimated cost while respecting constraints.
-3. It demonstrates intelligent behaviour because robots adapt to dynamic occupancy rather than following static shortest paths.
-4. It demonstrates performance evaluation because the code automatically records scenario metrics for 2, 5, and 10 agents.
-
-## Short Presentation Script
-
-This project models a warehouse where multiple robots collect items and return them to a packing station. Each robot is a rational agent because it plans using A* search with the cost function f(n)=g(n)+h(n), where h(n) is Manhattan distance. To avoid collisions, I used prioritized planning with a time-space reservation table, so lower-priority robots treat higher-priority robots' future paths as obstacles. The simulation runs scenarios with 2, 5, and 10 agents, logs performance to [warehouse_performance.csv](/workspaces/CS6053/warehouse_performance.csv), and visualizes the coordinated movement in [warehouse_mapf.gif](/workspaces/CS6053/warehouse_mapf.gif).
-
-## Very Short Viva Answer
-
-If you need a shorter answer in a live discussion, say:
-
-This is a multi-agent warehouse planning system. Each robot plans a path to a pick location and back to the packing station using A*. The robots are rational because they choose low-cost action sequences based on the map and the future movements of other robots. Prioritized planning prevents collisions, and the CSV output provides evidence for performance evaluation.
-
 ## Run
 
 1. Install dependencies:
