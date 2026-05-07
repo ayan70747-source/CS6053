@@ -69,7 +69,89 @@ Running simulation.py automatically generates warehouse_performance.csv with col
 4. Collisions_Avoided
 5. Computation_Time_MS
 
-## Visualisation
+## Interactive Visualisation (Local Browser)
+
+The file `warehouse_mapf_interactive.html` is a fully self-contained interactive viewer. All simulation data is embedded inside the file — no server, no Python, and no internet connection is required.
+
+### How to open it
+
+**Option 1 — Double-click (simplest)**
+
+Open your file explorer, navigate to the project folder, and double-click `warehouse_mapf_interactive.html`. It will open in your default web browser.
+
+**Option 2 — From the terminal**
+
+```bash
+# macOS
+open warehouse_mapf_interactive.html
+
+# Linux
+xdg-open warehouse_mapf_interactive.html
+
+# Windows (Command Prompt or PowerShell)
+start warehouse_mapf_interactive.html
+```
+
+**Option 3 — Python one-liner local server (use if Option 1/2 fails)**
+
+Some browsers block file:// resources. Running a tiny local server fixes this:
+
+```bash
+# Python 3
+python -m http.server 8000
+```
+
+Then open your browser and go to:
+
+```
+http://localhost:8000/warehouse_mapf_interactive.html
+```
+
+Press `Ctrl+C` in the terminal to stop the server when done.
+
+### Selecting a scenario
+
+A dropdown at the top of the page lets you switch between the three pre-computed scenarios:
+
+| Scenario | Agents |
+|---|---|
+| 2 Agents | 2 robots navigating to their pick goals |
+| 5 Agents | 5 robots with prioritised planning |
+| 10 Agents | 10 robots demonstrating conflict avoidance |
+
+Select a scenario from the dropdown and the grid reloads automatically.
+
+### Playback controls
+
+| Control | What it does |
+|---|---|
+| **Pause / Play** | Toggles the animation on and off |
+| **Step -1** | Moves the simulation back by one tick |
+| **Step +1** | Advances the simulation forward by one tick |
+| **Reset** | Returns the simulation to tick 0 |
+| **Speed (fps) slider** | Sets playback speed from 1 to 15 frames per second |
+| **Frame scrubber** | Drag to jump directly to any tick in the simulation |
+
+### Reading the visualisation
+
+| Element | Meaning |
+|---|---|
+| Dark grey blocks | Shelf obstacles |
+| Light cell | Floor (walkable aisle) |
+| Green tile | Packing station (delivery goal) |
+| Star marker | Pick-up location for each robot |
+| Coloured circle | Robot (each robot has a unique colour) |
+| Circle at packing station | Robot has completed its mission |
+
+### Troubleshooting
+
+- **Blank page or nothing renders** — Try Option 3 (Python server) above. Some browsers restrict loading from the `file://` protocol.
+- **Animation is too fast or too slow** — Adjust the Speed (fps) slider.
+- **Want to inspect a specific moment** — Pause the animation, then use Step -1 / Step +1 or drag the frame scrubber.
+
+---
+
+## Visualisation (Static GIF)
 
 Matplotlib animation displays:
 
